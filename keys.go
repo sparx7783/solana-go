@@ -20,7 +20,6 @@ package solana
 import (
 	"bytes"
 	"crypto"
-	"crypto/ed25519"
 	crypto_rand "crypto/rand"
 	"crypto/sha256"
 	"errors"
@@ -29,9 +28,10 @@ import (
 	"os"
 	"sort"
 
-	"filippo.io/edwards25519/field"
 	"github.com/gagliardetto/solana-go/base58"
 	mrtronbase58 "github.com/mr-tron/base58"
+	"github.com/oasisprotocol/curve25519-voi/curve"
+	"github.com/oasisprotocol/curve25519-voi/primitives/ed25519"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -152,9 +152,13 @@ func (k PrivateKey) PublicKey() PublicKey {
 // PK is a convenience alias for PublicKey
 type PK = PublicKey
 
+// done to keep verify the same as stdlib crypto/ed25519
+var verifyOptsStdLib = &ed25519.Options{
+	Verify: ed25519.VerifyOptionsStdLib,
+}
+
 func (p PublicKey) Verify(message []byte, signature Signature) bool {
-	pub := ed25519.PublicKey(p[:])
-	return ed25519.Verify(pub, message, signature[:])
+	return ed25519.VerifyWithOptions(p[:], message, signature[:], verifyOptsStdLib)
 }
 
 type PublicKey [PublicKeyLength]byte
@@ -678,32 +682,17 @@ func CreateProgramAddress(seeds [][]byte, programID PublicKey) (PublicKey, error
 	return PublicKeyFromBytes(hash[:]), nil
 }
 
-var feOne = new(field.Element).One()
-var d, _ = new(field.Element).SetBytes([]byte{
-	0xa3, 0x78, 0x59, 0x13, 0xca, 0x4d, 0xeb, 0x75,
-	0xab, 0xd8, 0x41, 0x41, 0x4d, 0x0a, 0x70, 0x00,
-	0x98, 0xe8, 0x79, 0x77, 0x79, 0x40, 0xc7, 0x8c,
-	0x73, 0xfe, 0x6f, 0x2b, 0xee, 0x6c, 0x03, 0x52})
-
 // Check if the provided `b` is on the ed25519 curve.
 func IsOnCurve(b []byte) bool {
 	if len(b) != ed25519.PublicKeySize {
 		return false
 	}
-	//_, err := new(edwards25519.Point).SetBytes(b)
-	y, err := new(field.Element).SetBytes(b)
-	if err != nil {
+	var compressed curve.CompressedEdwardsY
+	if _, err := compressed.SetBytes(b); err != nil {
 		return false
 	}
-
-	y2 := new(field.Element).Square(y)
-	u := new(field.Element).Subtract(y2, feOne)
-
-	vv := new(field.Element).Multiply(y2, d)
-	vv = vv.Add(vv, feOne)
-
-	_, wasSquare := new(field.Element).SqrtRatio(u, vv)
-	if wasSquare == 0 {
+	var p curve.EdwardsPoint
+	if _, err := p.SetCompressedY(&compressed); err != nil {
 		return false
 	}
 	return true

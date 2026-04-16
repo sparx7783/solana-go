@@ -8,6 +8,7 @@ require (
 	github.com/gagliardetto/treeout v0.1.4
 	github.com/google/uuid v1.6.0
 	github.com/mr-tron/base58 v1.2.0
+	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729
 	go.mongodb.org/mongo-driver/v2 v2.5.0
 )
 
@@ -59,7 +60,6 @@ require (
 )
 
 require (
-	filippo.io/edwards25519 v1.2.0
 	github.com/AlekSi/pointer v1.2.0
 	github.com/buger/jsonparser v1.1.2
 	github.com/davecgh/go-spew v1.1.1
