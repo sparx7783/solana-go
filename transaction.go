@@ -29,6 +29,7 @@ import (
 	"github.com/gagliardetto/treeout"
 	"github.com/mr-tron/base58"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 type Transaction struct {
@@ -284,24 +285,25 @@ func NewTransaction(instructions []Instruction, recentBlockHash Hash, opts ...Tr
 		}
 	}
 
-	programIDs := make(PublicKeySlice, 0)
-	accounts := []*AccountMeta{}
+	programIDsMap := make(map[PublicKey]struct{}, len(instructions))
+
+	total := 0
+	for _, instruction := range instructions {
+		total += len(instruction.Accounts())
+		programIDsMap[instruction.ProgramID()] = struct{}{}
+	}
+	accounts := make([]*AccountMeta, 0, total+len(programIDsMap))
+
 	for _, instruction := range instructions {
 		accounts = append(accounts, instruction.Accounts()...)
-		programIDs.UniqueAppend(instruction.ProgramID())
 	}
 
-	// for IsInvoked check
-	programIDsMap := make(map[PublicKey]struct{}, len(programIDs))
-	// Add programID to the account list
-	for _, programID := range programIDs {
+	for programID := range programIDsMap {
 		accounts = append(accounts, &AccountMeta{
 			PublicKey:  programID,
 			IsSigner:   false,
 			IsWritable: false,
 		})
-
-		programIDsMap[programID] = struct{}{}
 	}
 
 	// Sort. Prioritizing first by signer, then by writable
@@ -315,8 +317,8 @@ func NewTransaction(instructions []Instruction, recentBlockHash Hash, opts ...Tr
 		return 0
 	})
 
-	uniqAccountsMap := map[PublicKey]uint64{}
-	uniqAccounts := []*AccountMeta{}
+	uniqAccountsMap := make(map[PublicKey]uint64, len(accounts))
+	uniqAccounts := make([]*AccountMeta, 0, len(accounts))
 	for _, acc := range accounts {
 		if index, found := uniqAccountsMap[acc.PublicKey]; found {
 			uniqAccounts[index].IsWritable = uniqAccounts[index].IsWritable || acc.IsWritable
@@ -334,6 +336,7 @@ func NewTransaction(instructions []Instruction, recentBlockHash Hash, opts ...Tr
 	for idx, acc := range uniqAccounts {
 		if acc.PublicKey.Equals(feePayer) {
 			feePayerIndex = idx
+			break
 		}
 	}
 	if debugNewTransaction {
@@ -379,6 +382,8 @@ func NewTransaction(instructions []Instruction, recentBlockHash Hash, opts ...Tr
 		ReadonlyIndexes []uint8
 		Readonly        []PublicKey
 	})
+
+	message.AccountKeys = make([]PublicKey, 0, len(allKeys))
 	for idx, acc := range allKeys {
 
 		if debugNewTransaction {
@@ -423,6 +428,14 @@ func NewTransaction(instructions []Instruction, recentBlockHash Hash, opts ...Tr
 	var lookupsWritableKeys []PublicKey
 	var lookupsReadOnlyKeys []PublicKey
 	if len(lookupsMap) > 0 {
+		totalWritable, totalReadonly := 0, 0
+		for _, l := range lookupsMap {
+			totalWritable += len(l.Writable)
+			totalReadonly += len(l.Readonly)
+		}
+		lookupsWritableKeys = make([]PublicKey, 0, totalWritable)
+		lookupsReadOnlyKeys = make([]PublicKey, 0, totalReadonly)
+
 		lookups := make([]MessageAddressTableLookup, 0, len(lookupsMap))
 
 		sortedLookupKeys := make(PublicKeySlice, 0, len(lookupsMap))
@@ -453,17 +466,17 @@ func NewTransaction(instructions []Instruction, recentBlockHash Hash, opts ...Tr
 	}
 
 	var idx uint16
-	accountKeyIndex := make(map[string]uint16, len(message.AccountKeys)+len(lookupsWritableKeys)+len(lookupsReadOnlyKeys))
+	accountKeyIndex := make(map[PublicKey]uint16, len(message.AccountKeys)+len(lookupsWritableKeys)+len(lookupsReadOnlyKeys))
 	for _, acc := range message.AccountKeys {
-		accountKeyIndex[acc.String()] = idx
+		accountKeyIndex[acc] = idx
 		idx++
 	}
 	for _, acc := range lookupsWritableKeys {
-		accountKeyIndex[acc.String()] = idx
+		accountKeyIndex[acc] = idx
 		idx++
 	}
 	for _, acc := range lookupsReadOnlyKeys {
-		accountKeyIndex[acc.String()] = idx
+		accountKeyIndex[acc] = idx
 		idx++
 	}
 
@@ -479,14 +492,14 @@ func NewTransaction(instructions []Instruction, recentBlockHash Hash, opts ...Tr
 		accounts = instruction.Accounts()
 		accountIndex := make([]uint16, len(accounts))
 		for idx, acc := range accounts {
-			accountIndex[idx] = accountKeyIndex[acc.PublicKey.String()]
+			accountIndex[idx] = accountKeyIndex[acc.PublicKey]
 		}
 		data, err := instruction.Data()
 		if err != nil {
 			return nil, fmt.Errorf("unable to encode instructions [%d]: %w", txIdx, err)
 		}
 		message.Instructions = append(message.Instructions, CompiledInstruction{
-			ProgramIDIndex: accountKeyIndex[instruction.ProgramID().String()],
+			ProgramIDIndex: accountKeyIndex[instruction.ProgramID()],
 			Accounts:       accountIndex,
 			Data:           data,
 		})
@@ -576,15 +589,38 @@ func (tx *Transaction) PartialSign(getter privateKeyGetter) (out []Signature, er
 		return nil, fmt.Errorf("invalid signatures length, expected %d, actual %d", len(signerKeys), len(tx.Signatures))
 	}
 
-	for i, key := range signerKeys {
-		privateKey := getter(key)
-		if privateKey != nil {
-			s, err := privateKey.Sign(messageContent)
-			if err != nil {
-				return nil, fmt.Errorf("failed to signed with key %q: %w", key.String(), err)
+	// if signerKeys is len 1, spawning a goroutine is needless work
+	if len(signerKeys) > 1 {
+		var g errgroup.Group
+		for i, key := range signerKeys {
+			privateKey := getter(key)
+			if privateKey == nil {
+				continue
 			}
-			// Directly assign the signature to the corresponding position in the transaction's signature slice
-			tx.Signatures[i] = s
+			g.Go(func() error {
+				s, err := privateKey.Sign(messageContent)
+				if err != nil {
+					return fmt.Errorf("failed to sign with key %q: %w", key.String(), err)
+				}
+				// Directly assign the signature to the corresponding position in the transaction's signature slice
+				tx.Signatures[i] = s
+				return nil
+			})
+		}
+		if err := g.Wait(); err != nil {
+			return nil, err
+		}
+	} else {
+		for i, key := range signerKeys {
+			privateKey := getter(key)
+			if privateKey != nil {
+				s, err := privateKey.Sign(messageContent)
+				if err != nil {
+					return nil, fmt.Errorf("failed to signed with key %q: %w", key.String(), err)
+				}
+				// Directly assign the signature to the corresponding position in the transaction's signature slice
+				tx.Signatures[i] = s
+			}
 		}
 	}
 	return tx.Signatures, nil
