@@ -31,7 +31,7 @@ import (
 	"github.com/gagliardetto/solana-go/base58"
 	mrtronbase58 "github.com/mr-tron/base58"
 	"github.com/oasisprotocol/curve25519-voi/curve"
-	"github.com/oasisprotocol/curve25519-voi/primitives/ed25519"
+	voied25519 "github.com/oasisprotocol/curve25519-voi/primitives/ed25519"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
