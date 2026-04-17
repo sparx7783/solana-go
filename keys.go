@@ -69,13 +69,13 @@ func PrivateKeyFromBase58(privkey string) (PrivateKey, error) {
 }
 
 func ValidatePrivateKey(b []byte) (bool, error) {
-	if len(b) != ed25519.PrivateKeySize {
-		return false, fmt.Errorf("invalid private key size, expected %v, got %d", ed25519.PrivateKeySize, len(b))
+	if len(b) != voied25519.PrivateKeySize {
+		return false, fmt.Errorf("invalid private key size, expected %v, got %d", voied25519.PrivateKeySize, len(b))
 	}
-	// check if the public key is on the ed25519 curve
-	pub := ed25519.PrivateKey(b).Public().(ed25519.PublicKey)
+	// check if the public key is on the voied25519 curve
+	pub := voied25519.PrivateKey(b).Public().(voied25519.PublicKey)
 	if !IsOnCurve(pub) {
-		return false, errors.New("the corresponding public key is NOT on the ed25519 curve")
+		return false, errors.New("the corresponding public key is NOT on the voied25519 curve")
 	}
 	return true, nil
 }
@@ -110,7 +110,7 @@ func (k PrivateKey) String() string {
 }
 
 func NewRandomPrivateKey() (PrivateKey, error) {
-	pub, priv, err := ed25519.GenerateKey(crypto_rand.Reader)
+	pub, priv, err := voied25519.GenerateKey(crypto_rand.Reader)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (k PrivateKey) Sign(payload []byte) (Signature, error) {
 	if err := k.Validate(); err != nil {
 		return Signature{}, err
 	}
-	p := ed25519.PrivateKey(k)
+	p := voied25519.PrivateKey(k)
 	signData, err := p.Sign(crypto_rand.Reader, payload, crypto.Hash(0))
 	if err != nil {
 		return Signature{}, err
@@ -140,8 +140,8 @@ func (k PrivateKey) PublicKey() PublicKey {
 		panic(err)
 	}
 
-	p := ed25519.PrivateKey(k)
-	pub := p.Public().(ed25519.PublicKey)
+	p := voied25519.PrivateKey(k)
+	pub := p.Public().(voied25519.PublicKey)
 
 	var publicKey PublicKey
 	copy(publicKey[:], pub)
@@ -152,13 +152,13 @@ func (k PrivateKey) PublicKey() PublicKey {
 // PK is a convenience alias for PublicKey
 type PK = PublicKey
 
-// done to keep verify the same as stdlib crypto/ed25519
-var verifyOptsStdLib = &ed25519.Options{
-	Verify: ed25519.VerifyOptionsStdLib,
+// done to keep verify the same as stdlib crypto/voied25519
+var verifyOptsStdLib = &voied25519.Options{
+	Verify: voied25519.VerifyOptionsStdLib,
 }
 
 func (p PublicKey) Verify(message []byte, signature Signature) bool {
-	return ed25519.VerifyWithOptions(p[:], message, signature[:], verifyOptsStdLib)
+	return voied25519.VerifyWithOptions(p[:], message, signature[:], verifyOptsStdLib)
 }
 
 type PublicKey [PublicKeyLength]byte
@@ -300,7 +300,7 @@ func (p PublicKey) Bytes() []byte {
 	return []byte(p[:])
 }
 
-// Check if a `Pubkey` is on the ed25519 curve.
+// Check if a `Pubkey` is on the voied25519 curve.
 func (p PublicKey) IsOnCurve() bool {
 	return IsOnCurve(p[:])
 }
@@ -621,7 +621,7 @@ const (
 	SignatureLength = 64
 
 	// Number of bytes in a private key.
-	PrivateKeyLength = ed25519.PrivateKeySize
+	PrivateKeyLength = voied25519.PrivateKeySize
 
 	// // Maximum string length of a base58 encoded pubkey.
 	// MaxBase58Length = 44
@@ -684,7 +684,7 @@ func CreateProgramAddress(seeds [][]byte, programID PublicKey) (PublicKey, error
 
 // Check if the provided `b` is on the ed25519 curve.
 func IsOnCurve(b []byte) bool {
-	if len(b) != ed25519.PublicKeySize {
+	if len(b) != voied25519.PublicKeySize {
 		return false
 	}
 	var compressed curve.CompressedEdwardsY

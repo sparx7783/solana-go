@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/oasisprotocol/curve25519-voi/primitives/ed25519"
+	voied25519 "github.com/oasisprotocol/curve25519-voi/primitives/ed25519"
 
 	bin "github.com/gagliardetto/binary"
 	"github.com/gagliardetto/solana-go/base58"
@@ -187,7 +187,7 @@ func (p *Signature) UnmarshalJSON(data []byte) (err error) {
 
 // Verify checks that the signature is valid for the given public key and message.
 func (s Signature) Verify(pubkey PublicKey, msg []byte) bool {
-	return ed25519.VerifyWithOptions(pubkey[:], msg, s[:], verifyOptsStdLib)
+	return voied25519.VerifyWithOptions(pubkey[:], msg, s[:], verifyOptsStdLib)
 }
 
 func (p Signature) String() string {
